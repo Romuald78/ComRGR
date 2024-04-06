@@ -1,2 +1,26 @@
+COM_SLEEP = 0.001
+
+TOKEN_MULTI = 'ABCDEFGHIJ'
+
 TOPIC_REGISTER   = 'REGISTER'
 TOPIC_REGISTERED = 'REGISTERED'
+TOPIC_VALID      = 'VALID'
+
+# ------------------------------------
+
+LOG_ERR = '[ERR]'
+LOG_WRN = '[WRN]'
+LOG_INF = '[INF]'
+
+LOG_SERVER = '[SRV]'
+LOG_CLIENT = '[CLI]'
+
+CLR_NONE = '\x1B[0m'
+CLR_ERR  = '\x1B[38;2;192;0;0m'
+CLR_WRN  = '\x1B[38;2;192;128;0m'
+CLR_INF  = '\x1B[38;2;128;128;128m'
+CLR_NAME = '\x1B[38;2;128;128;255m'
+LOG_CLR = { LOG_ERR: CLR_ERR,
+            LOG_WRN: CLR_WRN,
+            LOG_INF: CLR_INF
+          }

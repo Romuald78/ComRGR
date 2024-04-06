@@ -1,60 +1,57 @@
-import json
 import pickle
 import socket
-import time
+import sys
 from random import randint
 from select import select
 
+from communications.com_constants import *
+
 
 class ComRGR:
+
 
     COM_MCAST_GRP  = "224.25.26.27"
     COM_MCAST_PRT  = 12345
     COM_SERVER_PRT = 54321
     COM_VERSION = 'v0.1'
 
+    def _log(self, msg, src, log_type):
+        clr = LOG_CLR[log_type]
+        txt = f"{CLR_NAME}{src}{clr}{log_type} {msg}"
+        print(txt, file=sys.stderr)
+
     def _set_MCAST(self):
         raise NotImplementedError()
-
-    def _reset_MCAST(self):
-        raise NotImplementedError()
-
-    def _process(self, callback):
-        # start time measurement (timeout)
-        start_time = time.time()
-        # wait for answers
-        while(True):
-            result = self._internal_receive()
-            if result is not None:
-                msg, addr, port = result
-                if callback(msg, addr, port):
-                    break
-            else:
-                # make the server waits a while
-                time.sleep(0.05)
-            # check timeout
-            end_time = time.time()
-            if end_time - start_time > self._timeout:
-                break
 
     def __init__(self, mcast_addr, mcast_port, timeout):
         self._MCASTSocket = None
         self._mcast_grp = mcast_addr
         self._mcast_prt = mcast_port
         self._timeout   = timeout
+        self._token     = str(randint(100000000, 999999999))
         self._set_MCAST()
         print(f"Starting {socket.gethostname()} as {self.__class__.__name__}...")
+
+    def _internal_prepare(self, msg, dest_token):
+        msg['nekot'] = dest_token[::-1]
 
     def _internal_receive(self):
         result = None
         ins, outs, excs = select([self._MCASTSocket], [self._MCASTSocket], [])
         if ins:
-            dataPair = self._MCASTSocket.recvfrom(1024)
+            dataPair = self._MCASTSocket.recvfrom(1280)
             data   = dataPair[0]
+            # print(len(data), file=sys.stderr)
             addr   = dataPair[1][0]
             port   = dataPair[1][1]
-            msg    = ComMsg(data)
+            try:
+                msg    = ComMsg(data)
+            except Exception as ex:
+                print(ex, file=sys.stderr)
+                print(dataPair, file=sys.stderr)
+                exit(99)
             result = (msg, addr, port)
+
         return result
 
 
@@ -74,7 +71,9 @@ class ComMsg:
         if data_bytes is not None:
             self.__data = ComMsg.__unserialize(data_bytes)
         else:
-            self.__data = {}
+            self.__data = {
+                'name' : socket.gethostname()
+            }
 
     @property
     def byte_data(self):

@@ -11,35 +11,8 @@ from communications.common import ComRGR, ComMsg
 
 class ComClient(ComRGR):
 
-    # check if server is already linked
-    def __check_server(self, name, token):
-
-
-
-    # CALLBACK (return true to stop network loop)
-    def __register(self, msg, addr, port):
-        # check this is a discovery message
-        if 'topic' not in msg or 'nekot' not in msg or 'name' not in msg:
-            print("Skip useless message")
-            return False
-
-        if msg['topic'] != TOPIC_REGISTERED:
-            print("Skip useless message")
-            return False
-
-
-
-                # store server information
-                self.__srvr_name = msg['server']
-                self.__srvr_addr = addr
-                self.__srvr_port = port
-                print(f"Client received DISCOVER message (server:'{self.__srvr_name}' @({self.__srvr_addr},{self.__srvr_port}).")
-                # Send back REGISTER message
-                msg['topic' ] = 'REGISTER'
-                msg['client'] = (socket.gethostname(), self._MCASTSocket.getsockname())
-                self.send(msg)
-            return True
-        return False
+    def __log(self, msg, log_type):
+        super()._log(msg, LOG_CLIENT, log_type)
 
     def _set_MCAST(self):
         try:
@@ -55,35 +28,56 @@ class ComClient(ComRGR):
                  mcast_port=ComRGR.COM_MCAST_PRT,
                  timeout=5):
         super().__init__(mcast_addr, mcast_port, timeout)
-        self.__server = {
-            'name' : None,
-            'token': None
-        }
+        self.__server = None
 
+    def is_registered(self):
+        return self.__server is not None
 
     def register(self):
-        print("Start registering...")
         # Send register message
         msg = ComMsg()
         msg['topic'] = 'REGISTER'
         self.send(msg)
-        # wait for server to send ACK
-        self._process(self.__register)
-        print("End of registering")
 
     def send(self, msg):
-        print(f"Sending multicast {msg}...")
+        # Always add the local token in the message before sending it
+        msg['token'] = self._token
+        # Prepare specific data
+        tkn = TOKEN_MULTI
+        if self.__server is not None:
+            tkn = self.__server['token']
+        self._internal_prepare(msg, tkn)
+        # Send message to server (multicast)
+        self.__log(f"multicast {msg}.", LOG_INF)
         sent = self._MCASTSocket.sendto(msg.byte_data, (self._mcast_grp, self._mcast_prt))
         if sent < 0:
-            print("[ERROR] Impossible to send message !")
+            self.__log("Impossible to send message !", LOG_ERR)
             exit(1)
 
     def receive(self):
         result = super()._internal_receive()
         if result is not None:
-            # Check if this message was for us : the sender
-            # must be the server found during the registering step
             msg, addr, port = result
-            print(f"Received {msg} from ({addr},{port}).")
+            self.__log(f"received {msg}.", LOG_INF)
+            # check this is a discovery message
+            if msg['topic'] == TOPIC_REGISTERED:
+                if self.__server is None:
+                    # store server information
+                    self.__server = {
+                        'name' : msg['name'],
+                        'addr' : addr,
+                        'port' : port,
+                        'token': msg['token']
+                    }
+                    # Send VALID message back
+                    msg2 = ComMsg()
+                    msg2['topic'] = TOPIC_VALID
+                    self.send(msg2)
+                else:
+                    # ignore message
+                    self.__log(f"ignore '{TOPIC_REGISTERED}' message.", LOG_WRN)
+
+                # message processed
+                result = None
         return result
 

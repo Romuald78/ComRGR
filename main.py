@@ -51,24 +51,27 @@ if __name__ == '__main__':
         # Now server has started com with registered clients only
         print("Game has STARTED : waiting for continuous messages...")
 
-        count = 100
+        msg = ComMsg()
+        msg['topic']   = 'TEST_ALL'
+        msg['counter'] = 0
+        msg['data']    = 'abcdefghijklmnopqrstuvwxyz'
+        cs.send_all(msg)
+
         while True:
             # Receive any message from clients
             result = cs.receive()
             # Process message or wait
             if result is not None:
                 msg, addr, port = result
-            elif count>0:
-                msg = ComMsg()
-                msg['topic'] = 'TEST_ALL'
-                msg['data'] = 'abcdefghijklmnopqrstuvwxyz'
-                cs.send_all(msg)
-                count -= 1
-
+                if msg['topic'] == 'TEST_CLIENT':
+                    msg2 = ComMsg()
+                    msg2['topic'  ] = 'TEST_ONE'
+                    msg2['counter'] = msg['counter'] + 1
+                    msg2['data'   ] = 'abcdefghijklmnopqrstuvwxyz'[::-1]
+                    cs.send_one(msg2, addr, port)
+            else:
                 time.sleep(DIRECT_COM_SLEEP)
 
-            else:
-                break
 
     # ===============================================
     # CLIENT
@@ -85,23 +88,21 @@ if __name__ == '__main__':
             time.sleep(CLIENT_REGISTER_SLEEP)
 
         print("REGISTERED successfully. Wait for 2 seconds...")
-        time.sleep(2)
         print("Game has STARTED : waiting for continuous messages...")
-        count = 100
         while True:
             # Receive any message from clients
             result = cc.receive()
             # Process message or wait
             if result is not None:
                 msg, addr, port = result
-            elif count>0:
-                msg = ComMsg()
-                msg['topic'] = 'TEST_SERVER'
-                msg['data'] = 'abcdefghijklmnopqrstuvwxyz'[::-1]
-                cc.send(msg)
-                count -= 1
-
-                time.sleep(DIRECT_COM_SLEEP)
+                if msg['topic'] == 'TEST_ONE' or msg['topic'] == 'TEST_ALL':
+                    if msg['counter'] >= 500*2:
+                        break
+                    msg2 = ComMsg()
+                    msg2['topic'  ] = 'TEST_CLIENT'
+                    msg2['counter'] = msg['counter'] + 1
+                    msg2['data'   ] = 'abcdefghijklmnopqrstuvwxyz'[::-1]
+                    cc.send(msg2)
             else:
-                break
+                time.sleep(DIRECT_COM_SLEEP)
 

@@ -59,7 +59,7 @@ class ComServer(ComRGR):
                 msg2['topic']    = TOPIC_REGISTERED
                 msg2['id']       = self.__clients[key]['id']
                 msg2['drct_prt'] = self._drct_prt
-                self.send_one(msg2, key)
+                self.__send_specific(msg2, key)
         elif vld:
             if cli is not None and not cli['valid']:
                 # set valid + update addr/port (direct socket)
@@ -135,7 +135,7 @@ class ComServer(ComRGR):
             return key
         return None
 
-    def send_one(self, msg, key):
+    def __send_specific(self, msg, key):
         # Always add the local token in the message before sending it
         msg['token'] = self._token
         # Prepare specific data
@@ -154,6 +154,13 @@ class ComServer(ComRGR):
             self.__log("Impossible to send one message !", LOG_ERR)
             exit(1)
 
+    def send_one(self, msg, addr, port):
+        # TODO : handle dictionary instead of O(N) search
+        for key in self.__clients:
+            if self.__clients[key]['addr'] == addr and self.__clients[key]['port'] == port:
+                self.__send_specific(msg, key)
+                break
+
     def send_all(self, msg):
         # Always add the local token in the message before sending it
         msg['token'] = self._token
@@ -161,7 +168,7 @@ class ComServer(ComRGR):
         self._internal_prepare(msg, TOKEN_MULTI)
         # Send message to all (one by one)
         for key in self.__clients:
-            self.send_one(msg, key)
+            self.__send_specific(msg, key)
 
     def receive(self):
         result = super()._internal_receive()
@@ -199,3 +206,7 @@ class ComServer(ComRGR):
     def client_key(self, i):
         keys = list(self.__clients.keys())
         return keys[i]
+
+    def client_counter(self, i):
+        return self.__clients[i]['counter']
+

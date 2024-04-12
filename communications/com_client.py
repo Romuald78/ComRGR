@@ -40,6 +40,14 @@ class ComClient(ComRGR):
         super().__init__(mcast_addr, mcast_port, ComRGR.COM_SERVER_PRT, timeout)
         self.__server = None
 
+    @property
+    def id(self):
+        res = None
+        if self.__server is not None:
+            if 'id' in self.__server:
+                res = self.__server['id']
+        return res
+
     def is_registered(self):
         return self.__server is not None
 

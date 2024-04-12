@@ -1,4 +1,9 @@
-COM_SLEEP = 0.001
+SERVER_REGISTER_SLEEP = 1.0
+CLIENT_REGISTER_SLEEP = 1.0
+
+DIRECT_COM_SLEEP = 0.020
+
+LAST_SEEN_TIMEOUT = 10.0
 
 TOKEN_MULTI = 'ABCDEFGHIJ'
 
@@ -8,9 +13,13 @@ TOPIC_VALID      = 'VALID'
 
 # ------------------------------------
 
+LOG_WAY_OUT = True
+LOG_WAY_IN  = False
+
 LOG_ERR = '[ERR]'
 LOG_WRN = '[WRN]'
 LOG_INF = '[INF]'
+LOG_MSG = ''
 
 LOG_SERVER = '[SRV]'
 LOG_CLIENT = '[CLI]'
@@ -20,7 +29,10 @@ CLR_ERR  = '\x1B[38;2;192;0;0m'
 CLR_WRN  = '\x1B[38;2;192;128;0m'
 CLR_INF  = '\x1B[38;2;128;128;128m'
 CLR_NAME = '\x1B[38;2;128;128;255m'
+CLR_FLOW = '\x1B[38;2;255;255;128m'
+CLR_MSG  = '\x1B[38;2;255;255;0m'
 LOG_CLR = { LOG_ERR: CLR_ERR,
             LOG_WRN: CLR_WRN,
-            LOG_INF: CLR_INF
+            LOG_INF: CLR_INF,
+            LOG_MSG: CLR_MSG
           }

@@ -1,3 +1,4 @@
+import datetime
 import json
 import socket
 import struct
@@ -5,39 +6,45 @@ import sys
 from select import select
 
 from communications.com_constants import *
-from communications.com_link import Link
 from communications.common import ComRGR, ComMsg
+from datetime import datetime
 
 
 class ComServer(ComRGR):
 
     # create client key
     @staticmethod
-    def __create_key(addr, port):
-        return f"{addr}-{port}"
+    def __create_key(addr, token):
+        return f"{addr}-{token}"
 
     # CALLBACK (return true to stop network loop)
     def __update_client(self, msg, addr, port):
         # Locals
-        key    = ComServer.__create_key(addr, port)
         rgstr  = msg['topic'] == TOPIC_REGISTER
         vld    = msg['topic'] == TOPIC_VALID
+        token  = msg['token']
         resend = False
         cli    = None
         # Update key
+        key = ComServer.__create_key(addr, token)
         if key in self.__clients:
             cli = self.__clients[key]
         # REGISTER MESSAGE
         if rgstr:
             if cli is None:
+                # increase nb of registered clients
+                # since the beginning
+                self.__max_client_nb += 1
                 # add new client
                 self.__clients[key] = {
-                    'name'   : msg['name'],
-                    'token'  : msg['token'],
-                    'addr'   : addr,
-                    'port'   : port,
-                    'counter': 0,
-                    'valid'  : False
+                    'name'     : msg['name'],
+                    'id'       : self.__max_client_nb,
+                    'token'    : msg['token'],
+                    'addr'     : addr,
+                    'port'     : port,
+                    'counter'  : 0,
+                    'valid'    : False,
+                    'last_seen': datetime.now()
                 }
                 resend = True
             elif not vld:
@@ -45,26 +52,31 @@ class ComServer(ComRGR):
                 resend = True
             else:
                 # ignore message
-                self.__log(f"ignore '{TOPIC_REGISTER}' message.", LOG_WRN)
+                self.__log(f"ignore '{TOPIC_REGISTER}' message", LOG_WRN)
             # (re)send REGISTERED message
-            # Send REGISTERED message
-            msg2 = ComMsg()
-            msg2['topic'] = TOPIC_REGISTERED
-            self.send_one(msg2, key)
+            if resend:
+                msg2 = ComMsg()
+                msg2['topic']    = TOPIC_REGISTERED
+                msg2['id']       = self.__clients[key]['id']
+                msg2['drct_prt'] = self._drct_prt
+                self.send_one(msg2, key)
         elif vld:
             if cli is not None and not cli['valid']:
-                cli['valid'] = True
+                # set valid + update addr/port (direct socket)
+                self.__clients[key]['valid'] = True
+                self.__clients[key]['addr' ] = addr
+                self.__clients[key]['port' ] = port
             else:
                 # ignore message
-                self.__log(f"ignore '{TOPIC_VALID}' message.", LOG_WRN)
+                self.__log(f"ignore '{TOPIC_VALID}' message", LOG_WRN)
 
     def __remove_client(self, key):
         if key in self.__clients:
             self.__log(f"remove client {key}", LOG_INF)
             del self.__clients[key]
 
-    def __log(self, msg, log_type):
-        super()._log(msg, LOG_SERVER, log_type)
+    def __log(self, msg, log_type, way_out=None):
+        super()._log(msg, LOG_SERVER, log_type, way_out)
 
     def _set_MCAST(self):
         try:
@@ -77,13 +89,51 @@ class ComServer(ComRGR):
             self.__log(msg, LOG_ERR)
             exit(1)
 
+    def _set_DRCT(self):
+        try:
+            self._DRCTSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+            self._DRCTSocket.bind(('', self._drct_prt))
+        except socket.error as msg:
+            self.__log(msg, LOG_ERR)
+            exit(1)
+
     def __init__(self,
                  mcast_addr=ComRGR.COM_MCAST_GRP,
                  mcast_port=ComRGR.COM_MCAST_PRT,
                  timeout=5):
-        super().__init__(mcast_addr, mcast_port, timeout)
-        # # Locals
+        super().__init__(mcast_addr,
+                         mcast_port,
+                         ComRGR.COM_SERVER_PRT,
+                         timeout)
+        # Locals
         self.__clients = {}
+        # Create specific socket for direct communication
+        self._set_DRCT()
+        # Nb clients
+        self.__max_client_nb = 0
+
+    def __check_connectivity(self):
+        keys_to_remove = []
+        for key in self.__clients:
+            before = self.__clients[key]['last_seen']
+            now    = datetime.now()
+            if (now - before).seconds > LAST_SEEN_TIMEOUT:
+                # this client can be removed from the client list
+                # because it has been too long we have heard from it
+                keys_to_remove.append(key)
+        for key in keys_to_remove:
+            self.__log(f"remove client {self.__clients[key]}", LOG_WRN)
+            del self.__clients[key]
+
+    def __update_connectivity(self, msg, addr, port):
+        token = msg['token']
+        key = self.__create_key(addr, token)
+        if key in self.__clients:
+            id = self.__clients[key]['id']
+            self.__log(f"update connectivity (#{id})", LOG_INF)
+            self.__clients[key]['last_seen'] = datetime.now()
+            return key
+        return None
 
     def send_one(self, msg, key):
         # Always add the local token in the message before sending it
@@ -91,10 +141,15 @@ class ComServer(ComRGR):
         # Prepare specific data
         self._internal_prepare(msg, self.__clients[key]['token'])
         # Send message to one
-        self.__log(f"send {msg} to ({key}).", LOG_INF)
+        id = self.__clients[key]['id']
+        self.__log(f"{msg['topic']} to (#{id})", LOG_MSG, LOG_WAY_OUT)
         addr = self.__clients[key]['addr']
         port = self.__clients[key]['port']
-        sent = self._MCASTSocket.sendto(msg.byte_data, (addr, port))
+        # check if this is a direct message or a MULTICAST answer
+        if self.__clients[key]['valid']:
+            sent = self._DRCTSocket.sendto(msg.byte_data, (addr, port))
+        else:
+            sent = self._MCASTSocket.sendto(msg.byte_data, (addr, port))
         if sent < 0:
             self.__log("Impossible to send one message !", LOG_ERR)
             exit(1)
@@ -104,14 +159,7 @@ class ComServer(ComRGR):
         msg['token'] = self._token
         # Prepare specific data
         self._internal_prepare(msg, TOKEN_MULTI)
-        # Send message to all
-        self.__log(f"send {msg} to all.", LOG_INF)
-        # TODO : try to use the multicast to send data to all clients
-        #        instead of a loop
-        #        sent = self._MCASTSocket.sendto(msg.byte_data, (self._mcast_grp, self._mcast_prt))
-        #        if sent < 0:
-        #            self.__log("Impossible to send multicast message !", LOG_ERR)
-        #            exit(1)
+        # Send message to all (one by one)
         for key in self.__clients:
             self.send_one(msg, key)
 
@@ -119,13 +167,21 @@ class ComServer(ComRGR):
         result = super()._internal_receive()
         if result is not None:
             msg, addr, port = result
+            # update connectivity
+            key = self.__update_connectivity(msg, addr, port)
+
             # the sender must be one of the registered clients
-            self.__log(f"Received {msg} from ({addr},{port}).", LOG_INF)
+            if key is not None:
+                id = self.__clients[key]['id']
+                self.__log(f"{msg['topic']} from (#{id})", LOG_MSG, LOG_WAY_IN)
 
             # handle client REGISTERING if needed
             if msg['topic'] in [TOPIC_REGISTER, TOPIC_VALID]:
                 self.__update_client(msg, addr, port)
-                result = None
+        else:
+            # in case there is no message to process
+            # we update the client information
+            self.__check_connectivity()
         return result
 
     @property

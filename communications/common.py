@@ -9,49 +9,76 @@ from communications.com_constants import *
 
 class ComRGR:
 
-
     COM_MCAST_GRP  = "224.25.26.27"
-    COM_MCAST_PRT  = 12345
-    COM_SERVER_PRT = 54321
-    COM_VERSION = 'v0.1'
+    COM_MCAST_PRT  = 23456
+    COM_SERVER_PRT = 12345
+    COM_VERSION    = 'v0.1'
 
-    def _log(self, msg, src, log_type):
+    @staticmethod
+    def wait_ENTER():
+        res = False
+        i, o, e = select([sys.stdin], [], [], 0.1)
+        if i:
+            usr = sys.stdin.readline()
+            res = True
+        return res
+
+    @staticmethod
+    def __one_receive(sckt):
+        result = None
+        # Check if socket exists
+        if sckt is not None:
+            # First check if there is something coming from the direct socket
+            ins, outs, excs = select([sckt], [sckt], [])
+            if ins:
+                dataPair = sckt.recvfrom(1280)
+                data = dataPair[0]
+                addr = dataPair[1][0]
+                port = dataPair[1][1]
+                try:
+                    msg = ComMsg(data)
+                    result = (msg, addr, port)
+                except Exception as ex:
+                    print(ex, file=sys.stderr)
+                    print(sckt)
+                    print(dataPair, file=sys.stderr)
+                    exit(99)
+        return result
+
+    def _log(self, msg, src, log_type, way_out=None):
         clr = LOG_CLR[log_type]
-        txt = f"{CLR_NAME}{src}{clr}{log_type} {msg}"
+        way = {LOG_WAY_OUT:'[>]', LOG_WAY_IN:'[<]', None: '   '}[way_out]
+        txt = f"{CLR_NAME}{src}{CLR_FLOW}{way}{clr}{msg}{CLR_NONE}"
         print(txt, file=sys.stderr)
 
     def _set_MCAST(self):
         raise NotImplementedError()
 
-    def __init__(self, mcast_addr, mcast_port, timeout):
+    def _set_DRCT(self):
+        raise NotImplementedError()
+
+    def __init__(self, mcast_addr, mcast_port, drct_port, timeout):
         self._MCASTSocket = None
-        self._mcast_grp = mcast_addr
-        self._mcast_prt = mcast_port
+        self._mcast_grp   = mcast_addr
+        self._mcast_prt   = mcast_port
+        self._DRCTSocket  = None
+        self._drct_prt    = drct_port
+
         self._timeout   = timeout
         self._token     = str(randint(100000000, 999999999))
         self._set_MCAST()
-        print(f"Starting {socket.gethostname()} as {self.__class__.__name__}...")
+        print(f"Starting {socket.gethostname()} as {self.__class__.__name__} with token '{self._token}'...")
 
     def _internal_prepare(self, msg, dest_token):
         msg['nekot'] = dest_token[::-1]
 
     def _internal_receive(self):
-        result = None
-        ins, outs, excs = select([self._MCASTSocket], [self._MCASTSocket], [])
-        if ins:
-            dataPair = self._MCASTSocket.recvfrom(1280)
-            data   = dataPair[0]
-            # print(len(data), file=sys.stderr)
-            addr   = dataPair[1][0]
-            port   = dataPair[1][1]
-            try:
-                msg    = ComMsg(data)
-            except Exception as ex:
-                print(ex, file=sys.stderr)
-                print(dataPair, file=sys.stderr)
-                exit(99)
-            result = (msg, addr, port)
-
+        # Check DIRECT message
+        result = ComRGR.__one_receive(self._DRCTSocket )
+        # If no direct message, check MULTICAST message
+        if result is None:
+            result = ComRGR.__one_receive(self._MCASTSocket)
+        # return message if any
         return result
 
 

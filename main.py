@@ -1,10 +1,11 @@
+import select
 import sys
 import time
 
-from communications.com_client import ComClient
-from communications.com_constants import COM_SLEEP, TOPIC_VALID
-from communications.com_server import ComServer
-from communications.common import ComMsg
+from communications.com_client    import ComClient
+from communications.com_constants import *
+from communications.com_server    import ComServer
+from communications.common import ComMsg, ComRGR
 
 if __name__ == '__main__':
 
@@ -21,77 +22,86 @@ if __name__ == '__main__':
     # SERVER
     # ===============================================
     if role == "server":
-        maxi = 1
-        if len(sys.argv) > 2:
-            maxi = int(sys.argv[2])
-            maxi = min(20, maxi)
 
-        debug = True
         cs = ComServer()
-        print(f"maximum clients = {maxi}")
+        print("WAITING for clients to join game...")
+
+        waiting_for_clients = True
+        while waiting_for_clients:
+            # Flags for external events (message or keyboard)
+            received_msg = False
+            received_usr = False
+
+            # Receive any message from clients
+            result = cs.receive()
+            # Process message if needed
+            if result is not None:
+                msg, addr, port = result
+                received_msg = True
+
+            # Receive any input on key
+            if ComRGR.wait_ENTER():
+                received_msg        = True
+                waiting_for_clients = False
+
+            # wait if no action performed
+            if not received_msg and not received_usr:
+                time.sleep(SERVER_REGISTER_SLEEP)
+
+        # Now server has started com with registered clients only
+        print("Game has STARTED : waiting for continuous messages...")
+
+        count = 100
         while True:
-            print(f"{cs.nb_valid}/{cs.nb_clients}")
-
             # Receive any message from clients
             result = cs.receive()
             # Process message or wait
             if result is not None:
                 msg, addr, port = result
-            else:
-                time.sleep(COM_SLEEP)
-
-            # send one global message to all clients
-            if cs.nb_valid >= maxi and debug:
-                start = time.time()
-                # Build message with number
+            elif count>0:
                 msg = ComMsg()
-                msg['topic'] = 'SEND_ALL'
-                msg['data'] = bytearray(1000)
+                msg['topic'] = 'TEST_ALL'
+                msg['data'] = 'abcdefghijklmnopqrstuvwxyz'
                 cs.send_all(msg)
-                debug = False
-                break
+                count -= 1
 
-        end = time.time()
-        print(f"Sent messages to {cs.nb_clients} clients in {end-start} sec.")
-        start = end
-        maxi = cs.nb_clients
-        count = 0
-        while  count<maxi :
-            # Receive any message from clients
-            result = cs.receive()
-            # Process message or wait
-            if result is not None:
-                msg, addr, port = result
-                if msg['topic'] == 'ANSWER_SERVER':
-                    count += 1
+                time.sleep(DIRECT_COM_SLEEP)
+
             else:
-                time.sleep(COM_SLEEP)
-        end = time.time()
-        print(f"Received messages from {count} clients in {end-start} sec.")
-
+                break
 
     # ===============================================
     # CLIENT
     # ===============================================
     elif role == "client":
         cc = ComClient()
-        while True:
-            # Send register message if needed
-            if not cc.is_registered():
-                cc.register()
+        print("Started REGISTERING phase...")
 
-            # Receive any message from server
+        # Wait to be fully registered
+        while not cc.is_registered():
+            # Send register message
+            cc.register()
+            # Wait for a while
+            time.sleep(CLIENT_REGISTER_SLEEP)
+
+        print("REGISTERED successfully. Wait for 2 seconds...")
+        time.sleep(2)
+        print("Game has STARTED : waiting for continuous messages...")
+        count = 100
+        while True:
+            # Receive any message from clients
             result = cc.receive()
             # Process message or wait
             if result is not None:
-                # Process message
                 msg, addr, port = result
-                if msg['topic'] == 'SEND_ALL':
-                    msg2 = ComMsg()
-                    msg2['topic'] = 'ANSWER_SERVER'
-                    msg2['data' ] = bytearray(1000)
-                    cc.send(msg2)
-                    break
+            elif count>0:
+                msg = ComMsg()
+                msg['topic'] = 'TEST_SERVER'
+                msg['data'] = 'abcdefghijklmnopqrstuvwxyz'[::-1]
+                cc.send(msg)
+                count -= 1
+
+                time.sleep(DIRECT_COM_SLEEP)
             else:
-                # Wait
-                time.sleep(COM_SLEEP)
+                break
+

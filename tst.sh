@@ -11,7 +11,7 @@ for i in $(seq "$1"); do
     echo "Launched client with PID = $pid..."
 done 
 
-echo "Starting server..."
-python3 2>"log_server.log" "main.py" "server" "$1"
+# echo "Starting server..."
+# python3 2>"log_server.log" "main.py" "server" "$1"
 
 

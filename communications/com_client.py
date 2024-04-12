@@ -5,14 +5,13 @@ import time
 from select import select
 
 from communications.com_constants import *
-from communications.com_link import Link
 from communications.common import ComRGR, ComMsg
 
 
 class ComClient(ComRGR):
 
-    def __log(self, msg, log_type):
-        super()._log(msg, LOG_CLIENT, log_type)
+    def __log(self, msg, log_type, way_out=None):
+        super()._log(msg, LOG_CLIENT, log_type, way_out)
 
     def _set_MCAST(self):
         try:
@@ -23,21 +22,37 @@ class ComClient(ComRGR):
             print(se)
             exit(1)
 
+    def _set_DRCT(self):
+        try:
+            addr = self.__server['addr']
+            port = self.__server['port']
+            self._DRCTSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+            self._DRCTSocket.connect((addr, port))
+
+        except socket.error as msg:
+            self.__log(msg, LOG_ERR)
+            exit(1)
+
     def __init__(self,
                  mcast_addr=ComRGR.COM_MCAST_GRP,
                  mcast_port=ComRGR.COM_MCAST_PRT,
                  timeout=5):
-        super().__init__(mcast_addr, mcast_port, timeout)
+        super().__init__(mcast_addr, mcast_port, ComRGR.COM_SERVER_PRT, timeout)
         self.__server = None
 
     def is_registered(self):
         return self.__server is not None
 
     def register(self):
-        # Send register message
-        msg = ComMsg()
-        msg['topic'] = 'REGISTER'
-        self.send(msg)
+        # Wait for any registering message coming from server
+        # flush any other message because registering
+        # is handled inside the receive method
+        self.receive()
+        # Send register message if needed
+        if  not self.is_registered():
+            msg = ComMsg()
+            msg['topic'] = 'REGISTER'
+            self.send(msg)
 
     def send(self, msg):
         # Always add the local token in the message before sending it
@@ -47,18 +62,39 @@ class ComClient(ComRGR):
         if self.__server is not None:
             tkn = self.__server['token']
         self._internal_prepare(msg, tkn)
-        # Send message to server (multicast)
-        self.__log(f"multicast {msg}.", LOG_INF)
-        sent = self._MCASTSocket.sendto(msg.byte_data, (self._mcast_grp, self._mcast_prt))
+        # if direct connection is established
+        if self.__server is not None:
+            # Send message to server (direct)
+            id = self.__server['id']
+            id = f" (cli #{id})"
+            self.__log(f"{msg['topic']}{id}", LOG_MSG, LOG_WAY_OUT)
+            addr = self.__server['addr']
+            port = self.__server['port']
+            sent = self._DRCTSocket.sendto(msg.byte_data, (addr, port))
+        else:
+            # Send message to server (multicast)
+            self.__log(f"{msg['topic']}", LOG_INF, LOG_WAY_OUT)
+            sent = self._MCASTSocket.sendto(msg.byte_data, (self._mcast_grp, self._mcast_prt))
         if sent < 0:
             self.__log("Impossible to send message !", LOG_ERR)
             exit(1)
 
     def receive(self):
-        result = super()._internal_receive()
+        result = None
+        try:
+            result = super()._internal_receive()
+        except Exception as ex:
+            self.__log("Connection with server lost.", LOG_ERR)
+            self.__log(f"{ex}", LOG_ERR)
+            # reset server state
+            self.__server = None
         if result is not None:
             msg, addr, port = result
-            self.__log(f"received {msg}.", LOG_INF)
+            id = ''
+            if self.is_registered():
+                id = self.__server['id']
+                id = f" (cli #{id})"
+            self.__log(f"{msg['topic']}{id}", LOG_MSG, LOG_WAY_IN)
             # check this is a discovery message
             if msg['topic'] == TOPIC_REGISTERED:
                 if self.__server is None:
@@ -66,9 +102,12 @@ class ComClient(ComRGR):
                     self.__server = {
                         'name' : msg['name'],
                         'addr' : addr,
-                        'port' : port,
-                        'token': msg['token']
+                        'port' : self._drct_prt,
+                        'token': msg['token'],
+                        'id'   : msg['id']
                     }
+                    # Establish direct connection with server
+                    self._set_DRCT()
                     # Send VALID message back
                     msg2 = ComMsg()
                     msg2['topic'] = TOPIC_VALID
@@ -76,8 +115,5 @@ class ComClient(ComRGR):
                 else:
                     # ignore message
                     self.__log(f"ignore '{TOPIC_REGISTERED}' message.", LOG_WRN)
-
-                # message processed
-                result = None
         return result
 
